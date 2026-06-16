@@ -87,10 +87,52 @@ EFI_STATUS reboot_into_firmware (VOID)
     return EFI_SUCCESS;
 }
 
+static VOID connect_block_controllers (VOID)
+{
+    EFI_GUID block_guid = BLOCK_IO_PROTOCOL;
+    EFI_HANDLE *handles = NULL;
+    EFI_STATUS res;
+    UINTN count = 0;
+
+    res = get_protocol_handles( &block_guid, &handles, &count );
+    if( EFI_ERROR( res ) )
+        return;
+
+    DEBUG_LOG("connecting %d handles", count);
+    for( UINTN i = 0; i < count; i++ )
+        uefi_call_wrapper( BS->ConnectController, 4, handles[i], NULL, NULL, TRUE );
+
+    efi_free(handles);
+}
+
+static EFI_STATUS
+find_filesystems (EFI_HANDLE **filesystems, UINTN *count, bootloader *steamos)
+{
+    EFI_GUID fs_guid = SIMPLE_FILE_SYSTEM_PROTOCOL;
+    EFI_STATUS res = EFI_SUCCESS;
+
+    res = get_protocol_handles( &fs_guid, filesystems, count );
+    ERROR_RETURN( res, res, L"get_fs_handles" );
+
+    DEBUG_LOG("enumerating %d EFI filesystems", *count);
+    for( int i = 0; i < (int)*count; i++ )
+    {
+        EFI_SIMPLE_FILE_SYSTEM_PROTOCOL* fs = NULL;
+
+        res = get_handle_protocol( &(*filesystems)[ i ], &fs_guid, (VOID **)&fs );
+        ERROR_CONTINUE( res, L"simple fs protocol" );
+    }
+
+    // Move the old pseudo-efi bootconf files to the new /esp location
+    DEBUG_LOG("migrating bootconf from old locations");
+    migrate_bootconfs( *filesystems, *count, steamos->criteria.device_path );
+
+    return res;
+}
+
 EFI_STATUS
 efi_main (EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *sys_table)
 {
-    EFI_GUID fs_guid = SIMPLE_FILE_SYSTEM_PROTOCOL;
     EFI_HANDLE* filesystems = NULL;
     UINTN count = 0;
     EFI_STATUS res = EFI_SUCCESS;
@@ -142,27 +184,28 @@ efi_main (EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *sys_table)
         DEBUG_LOG("done");
     }
 
-    res = get_protocol_handles( &fs_guid, &filesystems, &count );
-    ERROR_JUMP( res, cleanup, L"get_fs_handles" );
-
-    DEBUG_LOG("enumerating %d EFI filesystems", count);
-    for( int i = 0; i < (int)count; i++ )
-    {
-        EFI_SIMPLE_FILE_SYSTEM_PROTOCOL* fs = NULL;
-
-        res = get_handle_protocol( &filesystems[ i ], &fs_guid, (VOID **)&fs );
-        ERROR_CONTINUE( res, L"simple fs protocol" );
-    }
-
-    // Move the old pseudo-efi bootconf files to the new /esp location
-    DEBUG_LOG("migrating bootconf from old locations");
-    migrate_bootconfs( filesystems, count, steamos.criteria.device_path );
+    res = find_filesystems( &filesystems, &count, &steamos );
+    ERROR_JUMP( res, cleanup, L"find_filesystems" );
 
     // find_loaders is the slowest step, and is not very interruptible
     // so the hotkey registered at the start may not trigger a callback
     // till after it has returned.
     DEBUG_LOG("searching for stage 2 loaders");
     res = find_loaders( filesystems, count, &steamos );
+    if( res != EFI_SUCCESS )
+    {
+        // Some UEFI implementations may skip binding drivers, including the
+        // FAT filesystem driver, when running with fastboot enabled. This
+        // results in handles to the filesystems not being returned and boot
+        // failing. Bind all block handles to drivers, which should trigger
+        // binding of filesystems.
+        DEBUG_LOG("no valid steamos loader found, ensure all block controller connected and retry");
+        efi_free( filesystems );
+        connect_block_controllers();
+        res = find_filesystems( &filesystems, &count, &steamos );
+        ERROR_JUMP( res, cleanup, L"find_filesystems" );
+        res = find_loaders( filesystems, count, &steamos );
+    }
     ERROR_JUMP( res, cleanup, L"no valid steamos loader found" );
 
     // Was the ⋯ button pressed on boot (ie before the chainloader started)?
