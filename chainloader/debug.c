@@ -18,6 +18,7 @@
 // along with holo-efi.  If not, see <http://www.gnu.org/licenses/>.
 
 #include "err.h"
+#include "string.h"
 #include "util.h"
 #include "fileio.h"
 
@@ -34,8 +35,15 @@ static CHAR16 *debug_wbuf;
 
 static VOID debug_sync( UINT64 from, UINT64 size )
 {
+    UINT64 offset_size = 8;
+
     if( debug_log == NULL )
         return;
+
+    // Always update the offset
+    memcpy( debug_abuf, &debug_offset, sizeof(debug_offset) );
+    if( efi_file_seek( debug_log, 0 ) == EFI_SUCCESS )
+        efi_file_write( debug_log, debug_abuf, &offset_size );
 
     if( efi_file_seek( debug_log, from ) == EFI_SUCCESS )
         efi_file_write( debug_log, debug_abuf + from, &size );
@@ -62,6 +70,7 @@ VOID update_logstamp (VOID)
 VOID debug_log_init (EFI_FILE_PROTOCOL *dir, CHAR16 *path_rel)
 {
     UINTN info_size = 0;
+    UINTN size = 8;
     EFI_FILE_INFO *logstat = NULL;
     EFI_STATUS res = EFI_SUCCESS;
     CHAR16 *log_path = NULL;
@@ -70,7 +79,8 @@ VOID debug_log_init (EFI_FILE_PROTOCOL *dir, CHAR16 *path_rel)
     if( debug_log != NULL )
         return;
 
-    debug_offset = 0;
+    // Store the offset in the first 64-bits
+    debug_offset = 8;
 
     log_path = resolve_path( PREALLOC_DEBUGLOG, path_rel, FALSE );
 
@@ -107,8 +117,32 @@ VOID debug_log_init (EFI_FILE_PROTOCOL *dir, CHAR16 *path_rel)
 
     debug_message_count = 0;
 
+    // Grab current buffer content, update debug_offset and
+    // ensure the stored value is consistent with the first 64 bits being used
+    // to store the counter.
+    if( efi_file_seek( debug_log, 0 ) == EFI_SUCCESS )
+        efi_file_read( debug_log, debug_abuf, &size );
+
+    memcpy( &debug_offset, debug_abuf, sizeof(debug_offset) );
+
+    if ( debug_offset < 8 )
+        debug_offset = 8;
+
+    if ( debug_offset >= debug_bufsize )
+        debug_offset = 8;
+
+    // Read in any existing data so our buffer is consistent with that stored
+    // in the EFI environment
+    if ( debug_offset > 8 ) {
+        if( efi_file_seek( debug_log, 8 ) == EFI_SUCCESS ) {
+                size = debug_offset - 8;
+                efi_file_read( debug_log, debug_abuf + 8, &size );
+	}
+    }
+
     // zero out the log so we wipe any existing contents
-    debug_sync( 0, debug_bufsize );
+    // Sync the offset and clear from debug_offset so we can keep previous data
+    debug_sync( debug_offset, debug_bufsize - debug_offset);
 
     return;
 
@@ -161,9 +195,9 @@ VOID debug_log_printf (const char *fmt, ...)
     if( debug_offset + wrote >= debug_bufsize - 1 )
     {
         // rewind:
-        debug_offset = 0;
-        astart = debug_abuf;
-        space = debug_bufsize;
+        debug_offset = 8;
+        astart = debug_abuf + debug_offset;
+        space = debug_bufsize - debug_offset;
 
         va_start( args, fmt );
         wrote = vsprintf_a( astart, space, (const char *)fmt, args );
