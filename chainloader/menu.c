@@ -19,7 +19,6 @@
 
 #include "menu.h"
 #include "con/menu.h"
-#include "gfx/gfx.h"
 #include "gfx/menu.h"
 #include "timer.h"
 
@@ -32,11 +31,6 @@ menu_alloc (INTN entries, CONST CHAR16 *title)
     ui->option  = efi_alloc( entries * sizeof(menu_option) );
     ui->entries = entries;
     ui->label_width = 0;
-
-    // Some firmware (eg with fastboot enabled) skips connecting graphics
-    // drivers at startup. Force-connect them now so that the GOP interface
-    // is fully initialised before we try to use it as a menu backend:
-    gfx_connect_controllers();
 
     // try various backends here:
     ui->engine = gfx_menu_engine();

@@ -27,6 +27,7 @@
 #include "console-ex.h"
 #include "debug.h"
 #include "gfx/font.h"
+#include "gfx/gfx.h"
 
 static EFI_STATUS reset_system (IN EFI_RESET_TYPE type,
                                 IN EFI_STATUS     status,
@@ -166,6 +167,9 @@ efi_main (EFI_HANDLE image_handle, EFI_SYSTEM_TABLE *sys_table)
     // block handles to drivers, which should trigger binding of filesystems.
     DEBUG_LOG("ensure all block controllers connected");
     connect_block_controllers();
+
+    DEBUG_LOG("ensure all graphics controllers connected");
+    gfx_connect_controllers();
 
     res = get_protocol_handles( &fs_guid, &filesystems, &count );
     ERROR_JUMP( res, cleanup, L"get_fs_handles" );
