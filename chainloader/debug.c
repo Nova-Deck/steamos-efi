@@ -59,6 +59,118 @@ VOID update_logstamp (VOID)
                now.Hour, now.Minute, now.Second );
 }
 
+static BOOLEAN logfile_ok (EFI_FILE_INFO *file, CHAR16 **pfx, UINT64 *mtime)
+{
+    CHAR16 *suffix = NULL;
+
+    suffix = strstr_w( &file->FileName[0], PREALLOC_DEBUGLOG );
+
+    if( suffix == NULL )
+        return FALSE;
+
+    if( suffix == &file->FileName[0] )
+    {
+        *pfx = efi_alloc( sizeof(CHAR16) );
+        **pfx = (CHAR16)0;
+    }
+    else
+    {
+        UINT64 len = (suffix - &file->FileName[0]);
+        *pfx = efi_alloc( sizeof(CHAR16) * (len + 1) );
+        mem_copy( *pfx, &file->FileName[0], len * sizeof(CHAR16) );
+    }
+
+    *mtime = efi_time_to_timestamp( &file->ModificationTime );
+
+    return TRUE;
+}
+
+#define SWAP_WSTR(a,b) \
+    ({ CHAR16 *c = a; a = b; b = c; })
+#define OVERWRITE(a,b) \
+    ({ if( (a) != NULL ) efi_free( a ); a = strdup_w( b ); })
+
+// Note that none of this is ever likely to end up in the debug log
+// because this is how we find the debug log, so if it fails there's
+// not likely to be anywhere to write to:
+static CHAR16 *find_debug_log (EFI_FILE_PROTOCOL *dir, CHAR16 *path_rel)
+{
+    EFI_FILE_PROTOCOL *logdir = NULL;
+    CHAR16 *logdir_path = NULL;
+    EFI_FILE_INFO *dirent = NULL;
+    UINTN de_size = 0;
+    CHAR16 *log = NULL;
+    EFI_STATUS res;
+    CHAR16 *last_prefix = NULL;
+    UINT64 last_mtime = 0;
+
+    logdir_path = resolve_path( L".", path_rel, FALSE );
+    res = efi_file_open( dir, &logdir, logdir_path, 0, 0 );
+    efi_free(logdir_path);
+    ERROR_RETURN( res, NULL, L"Could not open bootloader directory" );
+
+    // valid candidates are "XX." + PREALLOC_DEBUGLOG
+    while( TRUE )
+    {
+        CHAR16 *prefix = NULL;
+        UINT64 mtime = 0;
+
+        // this allocates dirent if de_size is passed holding 0
+        // ie it is allocated the first time through
+        res = efi_readdir( logdir, &dirent, &de_size );
+        ERROR_CONTINUE( res, L"readdir of %S failed", path_rel );
+
+        // End of directory:
+        if( de_size == 0 )
+            break;
+
+        if( logfile_ok( dirent, &prefix, &mtime ) )
+        {
+            // first candidate we've found, adopt it:
+            if( log == NULL )
+            {
+                log = strdup_w( &dirent->FileName[0] );
+                SWAP_WSTR( last_prefix, prefix );
+                last_mtime = mtime;
+            }
+            else
+            {
+                // found an older file, adopt this instead:
+                if( last_mtime > mtime )
+                {
+                    OVERWRITE( log, &dirent->FileName[0] );
+                    SWAP_WSTR( last_prefix, prefix );
+                    last_mtime = mtime;
+                }
+                // same age, compare prefixes:
+                else if ( last_mtime == mtime &&
+                          strcmp_w(prefix, last_prefix) > 0 )
+                {
+                    OVERWRITE( log, &dirent->FileName[0] );
+                    SWAP_WSTR( last_prefix, prefix );
+                    last_mtime = mtime;
+                }
+            }
+
+            efi_free( prefix );
+        }
+    }
+
+    efi_free( last_prefix );
+    efi_free( dirent );
+
+    if( log != NULL )
+    {
+        CHAR16 *absolute_log = resolve_path( log, path_rel, FALSE );
+
+        efi_free( log );
+
+        return absolute_log;
+    }
+
+    return NULL;
+}
+
 VOID debug_log_init (EFI_FILE_PROTOCOL *dir, CHAR16 *path_rel)
 {
     UINTN info_size = 0;
@@ -72,7 +184,7 @@ VOID debug_log_init (EFI_FILE_PROTOCOL *dir, CHAR16 *path_rel)
 
     debug_offset = 0;
 
-    log_path = resolve_path( PREALLOC_DEBUGLOG, path_rel, FALSE );
+    log_path = find_debug_log( dir, path_rel );
 
     // Could not figure out where the debug file would be - give up.
     if( log_path == NULL )
@@ -88,6 +200,7 @@ VOID debug_log_init (EFI_FILE_PROTOCOL *dir, CHAR16 *path_rel)
     // (we only have wchar sprintf available to us so we use both):
     res = efi_file_stat( debug_log, &logstat, &info_size );
     ERROR_JUMP( res, cleanup, L"DEBUG: Unable to stat logfile %s", log_path );
+    efi_free( log_path );
 
     debug_bufsize = logstat->FileSize;
     efi_free( logstat );
