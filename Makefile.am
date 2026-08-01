@@ -134,7 +134,7 @@ steamcl_elf_CFLAGS   = $(EFI_CFLAGS) -DRELEASE_VERSION="\"$(RELEASE_VERSION)\""
 steamcl_elf_CFLAGS  += $(CODING_STANDARDS)
 steamcl_elf_LDFLAGS  = $(LDFLAGS) $(EFI_LDFLAGS)
 steamcl_elf_LDADD    = $(EFI_EXTRALIBS)
-steamcl_elf_LINK     = $(LD) $(steamcl_elf_LDFLAGS) -o $@
+steamcl_elf_LINK     = $(TARGET_LD) $(steamcl_elf_LDFLAGS) -o $@
 
 holo_bootconf_SOURCES =    bootconf/bootconf.c     \
                            bootconf/bootconf.h     \
