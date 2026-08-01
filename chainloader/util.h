@@ -58,9 +58,15 @@
 #define NEWCONFPATH  L"\\SteamOS\\conf"
 #define EFIDIR       L"\\EFI"
 
+#ifdef __aarch64__
+#define GRUBLDR     EFIDIR L"\\steamos\\grubaa64.efi"
+#define SYSTEMDLDR  EFIDIR L"\\SYSTEMD\\SYSTEMD-BOOTAA64.EFI"
+#define DEFAULTLDR  EFIDIR L"\\Boot\\bootaa64.efi"
+#else
 #define GRUBLDR     EFIDIR L"\\steamos\\grubx64.efi"
 #define SYSTEMDLDR  EFIDIR L"\\SYSTEMD\\SYSTEMD-BOOTX64.EFI"
 #define DEFAULTLDR  EFIDIR L"\\Boot\\bootx64.efi"
+#endif
 #define STEAMOSLDR  GRUBLDR
 #define CHAINLDR    EFIDIR L"\\Shell\\steamcl.efi"
 

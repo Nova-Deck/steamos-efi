@@ -48,8 +48,12 @@
 // this converts micro-seconds to event timeout in 10ns
 #define EFI_TIMER_PERIOD_MICROSECONDS(s) (s * 10)
 
-// this is x86_64 specific
+// machine type of the stage-2 bootloader (PE) we chainload
+#ifdef __aarch64__
+#define EFI_STUB_ARCH 0xaa64
+#else
 #define EFI_STUB_ARCH 0x8664
+#endif
 
 static MENU_REASON display_menu = MENU_REASON_NONE;
 static BOOLEAN verbose_boot = FALSE;
