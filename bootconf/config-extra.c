@@ -272,7 +272,8 @@ size_t write_config (DIR *dir, const char *ident, const cfg_entry *cfg)
 
     if( fd >= 0 )
     {
-        ftruncate( fd, written );
+        if( ftruncate( fd, written ) != 0 )
+            goto fail;
         new_conf =
           mmap( NULL, written, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0 );
 
