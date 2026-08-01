@@ -5,32 +5,23 @@ on:
   pull_request:
 
 jobs:
-  cross-build-aarch64:
-    runs-on: ubuntu-24.04
+  build-aarch64:
+    runs-on: ubuntu-24.04-arm
     steps:
       - uses: actions/checkout@v4
-      - name: Install cross toolchain + deps
-        run: |
-          sudo dpkg --add-architecture arm64
-          sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            gnu-efi:arm64 \
-            libc6-dev-arm64-cross \
-            gcc-aarch64-linux-gnu \
-            autoconf automake libtool pkg-config \
-            fontconfig fonts-dejavu-core \
-            grub-common
-      - name: Autoreconf + configure
-        run: |
-          autoreconf -ivf
-          ./configure --host=aarch64-linux-gnu --with-release-version=ci
-      - name: Build
-        run: make -j"$(nproc)"
-      - name: Smoke check artifacts
+
+      - name: build the aarch64 build image
+        run: docker build -t steamos-efi-build .
+
+      - name: build (inside the arm64 image)
+        run: docker run --rm -v "$PWD":/src -w /src steamos-efi-build bash ci/build.sh
+
+      - name: smoke check artifacts
         run: |
           file steamcl.efi holo-bootconf
           file steamcl.efi | grep -q "ARM64"
           file holo-bootconf | grep -q "statically linked"
+
       - uses: actions/upload-artifact@v4
         with:
           name: steamos-efi-aarch64
