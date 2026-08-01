@@ -19,7 +19,7 @@ jobs:
       - name: smoke check artifacts
         run: |
           file steamcl.efi holo-bootconf
-          file steamcl.efi | grep -q "ARM64"
+          file steamcl.efi | grep -qiE "aarch64|arm64"
           file holo-bootconf | grep -q "statically linked"
 
       - uses: actions/upload-artifact@v4
